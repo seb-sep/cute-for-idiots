@@ -62,3 +62,19 @@ set_target_properties(my_cutlass_app PROPERTIES
 install(TARGETS my_cutlass_app
     RUNTIME DESTINATION bin
 )
+
+add_executable(print_layouts print_layouts.cu)
+
+target_link_libraries(print_layouts
+    PRIVATE
+    CUTLASS
+    ${CUDA_LIBRARIES}
+)
+
+target_include_directories(print_layouts
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/cutlass/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/cutlass/cute/include  # CuTe headers
+    ${CUDA_INCLUDE_DIRS}
+)
