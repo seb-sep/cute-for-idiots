@@ -3,20 +3,26 @@
 int main() {
     using namespace cute;
 
-    auto a = make_layout(make_shape(Int<4>{}, Int<8>{}), LayoutRight{});
-    // auto a = make_layout(make_shape(make_shape(2, 2), Int<2>{}), make_stride(make_stride(4, 1), Int<2>{}));
-    auto tiler = Shape<_2, _2>{};
-    auto thr = Layout<Shape<_2, _2>, Stride<_2, _1>>{};
+    // auto a = make_layout(make_shape(Int<4>{}, Int<8>{}), LayoutRight{});
+    // // auto a = make_layout(make_shape(make_shape(2, 2), Int<2>{}), make_stride(make_stride(4, 1), Int<2>{}));
+    // auto tiler = Shape<_2, _2>{};
+    // auto thr = Layout<Shape<_2, _2>, Stride<_2, _1>>{};
+    // (12,(4,8)):(59,(13,1))
+    auto a = make_layout(make_shape(8,24), LayoutRight{});  // (8,24)
+    auto tiler = Shape<_4,_8>{};                    // (_4,_8)
+
+    auto tiled_a = zipped_divide(a, tiler);   
 
     TikzColor_TV color_fn;
     // TikzColor_BWx8 color_fn;
     // auto thrid = [](int tid) { return tid; };
-    // print_latex(a, thr, color_fn);
-    print_layout(logical_divide(a, thr));
+    print_latex(tiled_a);
+    // print_latex(result);
+    // print(result);
     printf("\n");
-    print_layout(zipped_divide(a, thr));
+    // print_layout(zipped_divide(layout, tiler));
     printf("\n");
-    print(tiled_divide(a, thr));
+    // print(tiled_divide(layout, tiler));
     printf("\n");
     // print_layout(complement(make_layout(make_shape(Int<4>{}, Int<4>{}), LayoutRight{}), make_shape(Int<2>{}, Int<2>{})));
     
