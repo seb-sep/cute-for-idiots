@@ -8,8 +8,9 @@ project(cutlass_for_idiots LANGUAGES CXX CUDA)
 find_package(CUDA REQUIRED)
 
 # Set default CUDA architecture if not specified
+# 6.1 is pascal for gtx 1070
 if(NOT DEFINED CUTLASS_NVCC_ARCHS)
-    set(CUTLASS_NVCC_ARCHS 80 CACHE STRING "CUDA architectures to compile for")
+    set(CUTLASS_NVCC_ARCHS 61 CACHE STRING "CUDA architectures to compile for")
 endif()
 
 # Disable all CUTLASS components except core functionality
@@ -34,17 +35,17 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -gencode arch=compute_${CUTLASS_NVCC_A
 add_subdirectory(cutlass)
 
 # Create your executable
-add_executable(my_cutlass_app main.cu)
+add_executable(tiled_copy tiled_copy.cu)
 
 # Link against minimal CUTLASS components
-target_link_libraries(my_cutlass_app
+target_link_libraries(tiled_copy
     PRIVATE
     CUTLASS
     ${CUDA_LIBRARIES}
 )
 
 # Include directories - only the essential ones
-target_include_directories(my_cutlass_app
+target_include_directories(tiled_copy
     PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/cutlass/include
@@ -53,13 +54,13 @@ target_include_directories(my_cutlass_app
 )
 
 # Set C++ standard for the target
-set_target_properties(my_cutlass_app PROPERTIES
+set_target_properties(tiled_copy PROPERTIES
     CUDA_STANDARD 17
     CUDA_STANDARD_REQUIRED ON
 )
 
 # Optional: Set up installation
-install(TARGETS my_cutlass_app
+install(TARGETS tiled_copy
     RUNTIME DESTINATION bin
 )
 
