@@ -1,7 +1,7 @@
 {
     "configurations": [
         {
-            "name": "CUDA",
+            "name": "CUDA_local",
             "includePath": [
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/cutlass/include",
@@ -9,6 +9,20 @@
             ],
             "defines": [],
             "compilerPath": "/usr/local/cuda/bin/nvcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "configurationProvider": "ms-vscode.cmake-tools"
+        },
+        {
+            "name": "Explorer",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/cutlass/include",
+                "/shared/EL9/explorer/cuda/12.3.0/include"
+            ],
+            "defines": [],
+            "compilerPath": "/shared/EL9/explorer/cuda/12.3.0/bin/nvcc",
             "cStandard": "c11",
             "cppStandard": "c++17",
             "intelliSenseMode": "linux-gcc-x64",

@@ -9,8 +9,9 @@ find_package(CUDA REQUIRED)
 
 # Set default CUDA architecture if not specified
 # 6.1 is pascal for gtx 1070
+#6.0 for p100
 if(NOT DEFINED CUTLASS_NVCC_ARCHS)
-    set(CUTLASS_NVCC_ARCHS 61 CACHE STRING "CUDA architectures to compile for")
+    set(CUTLASS_NVCC_ARCHS 60 CACHE STRING "CUDA architectures to compile for")
 endif()
 
 # Disable all CUTLASS components except core functionality
