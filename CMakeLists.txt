@@ -80,3 +80,34 @@ target_include_directories(print_layouts
     ${CMAKE_CURRENT_SOURCE_DIR}/cutlass/cute/include  # CuTe headers
     ${CUDA_INCLUDE_DIRS}
 )
+
+# Create executable for simple_gemm
+add_executable(simple_gemm simple_gemm.cu)
+
+# Link against CUTLASS and CUDA libraries including cuBLAS
+target_link_libraries(simple_gemm
+    PRIVATE
+    CUTLASS
+    ${CUDA_LIBRARIES}
+    cublas
+)
+
+# Include directories for simple_gemm
+target_include_directories(simple_gemm
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/cutlass/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/cutlass/cute/include  # CuTe headers
+    ${CUDA_INCLUDE_DIRS}
+)
+
+# Set C++ standard for the target
+set_target_properties(simple_gemm PROPERTIES
+    CUDA_STANDARD 17
+    CUDA_STANDARD_REQUIRED ON
+)
+
+# Optional: Set up installation
+install(TARGETS simple_gemm
+    RUNTIME DESTINATION bin
+)
