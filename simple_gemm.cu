@@ -20,14 +20,13 @@
     } \
 } while(0)
 
+#define DEBUG_PRINT 0
+
 using namespace cute;
 
 // cublas matmul tester (NT row-major inputs, just like in pytorch linear layers)
 // https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
-void cublas_multiply(float* A, float* B, float* C, int M, int N, int K) {
-    cublasHandle_t handle;
-    CUBLAS_CHECK(cublasCreate(&handle));
-    
+void cublas_multiply(float* A, float* B, float* C, int M, int N, int K, cublasHandle_t handle) {
     float alpha = 1.0f;
     float beta = 0.0f;
     
@@ -43,7 +42,6 @@ void cublas_multiply(float* A, float* B, float* C, int M, int N, int K) {
                             &beta,
                             C, N)); 
     
-    CUBLAS_CHECK(cublasDestroy(handle));
 }
 
 template <class ProblemShape, class CtaTiler, 
@@ -130,6 +128,7 @@ __global__ void simple_gemm_kernel(
     Tensor tCrC = make_tensor_like(tCgC);         
 
     // Print tensors for thread 0
+    #if DEBUG_PRINT
     if (thread0()) {
         printf("\ntCsA: ");
         print(tCsA);
@@ -138,8 +137,9 @@ __global__ void simple_gemm_kernel(
         printf("\ntCgC: ");
         print(tCgC);
         printf("\ntCrC: ");
-        print(tCrC);
-    }
+            print(tCrC);
+        }
+    #endif
     clear(tCrC);
 
     // gemmm mainloop
@@ -157,6 +157,36 @@ __global__ void simple_gemm_kernel(
 
     copy(tCrC, tCgC); // remember copy is src to dst
     
+}
+
+// return average time of runs in ms
+template <typename F>
+float bench_gemm(F gemm_func) {
+    // warmup runs
+    for (int i = 0; i < 10; ++i)
+        gemm_func();
+
+    int n_runs = 100;
+    // timed runs
+    thrust::host_vector<float> times(n_runs);
+    for (int i = 0; i < n_runs; ++i) {
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+        cudaEventRecord(start, 0);
+        gemm_func();
+        cudaEventRecord(stop, 0);
+        cudaEventSynchronize(stop); 
+        float ms = 0;
+        cudaEventElapsedTime(&ms, start, stop); // cuda events record in ms
+        times[i] = ms;
+        // clear l2 for next run
+        // https://docs.nvidia.com/cuda/cuda-c-programming-guide/#l2-persistence-example
+        cudaCtxResetPersistingL2Cache();
+    }
+
+    // return average of times
+    return (std::accumulate(times.begin(), times.end(), 0.0f)) / n_runs;
 }
 
 int main() {
@@ -222,10 +252,12 @@ int main() {
     CUDA_CHECK(cudaGetLastError());
 
     // Run cuBLAS GEMM
+    cublasHandle_t handle;
+    CUBLAS_CHECK(cublasCreate(&handle));
     cublas_multiply(thrust::raw_pointer_cast(d_A.data()),
                    thrust::raw_pointer_cast(d_B.data()),
                    thrust::raw_pointer_cast(d_C_cublas.data()),
-                   size<0>(gemm_shape), size<1>(gemm_shape), size<2>(gemm_shape));
+                   size<0>(gemm_shape), size<1>(gemm_shape), size<2>(gemm_shape), handle);
 
     // Copy results back to host
     h_C = d_C;
@@ -249,12 +281,38 @@ int main() {
             }
         }
     }
-
+    
     if (errors == 0) {
         std::cout << "Success. CUTLASS and cuBLAS results match." << std::endl;
     } else {
         std::cerr << "Found " << errors << " errors." << std::endl;
     }
+
+    float cutlass_time = bench_gemm([&]() {
+        simple_gemm_kernel<<<gridDim, blockDim>>>(gemm_shape, cta_tiler, ta_tiler, tb_tiler, tc_tiler, 
+                                             thrust::raw_pointer_cast(d_A.data()), 
+                                             thrust::raw_pointer_cast(d_B.data()), 
+                                             thrust::raw_pointer_cast(d_C.data()));
+    });
+
+    float cublas_time = bench_gemm([&]() {
+        cublas_multiply(thrust::raw_pointer_cast(d_A.data()),
+                   thrust::raw_pointer_cast(d_B.data()),
+                   thrust::raw_pointer_cast(d_C_cublas.data()),
+                   size<0>(gemm_shape), size<1>(gemm_shape), size<2>(gemm_shape), handle);
+    });
+
+    CUBLAS_CHECK(cublasDestroy(handle));
+
+    // total number of flops in a matmul is 2mnk (each dot product output in C is 2k flops), and we calculate mn outputs
+    auto total_flops = 2.0f * size<0>(gemm_shape) * size<1>(gemm_shape) * size<2>(gemm_shape);
+    auto cutlass_tflops = total_flops / (cutlass_time / 1000.0f) / 1e12;
+    auto cublas_tflops = total_flops / (cublas_time / 1000.0f) / 1e12;
+
+    std::cout << "Cutlass time: " << cutlass_time << " ms" << std::endl;
+    std::cout << "Cutlass TFLOPS: " << cutlass_tflops << std::endl;
+    std::cout << "cuBLAS time: " << cublas_time << " ms" << std::endl;
+    std::cout << "cuBLAS TFLOPS: " << cublas_tflops << std::endl;
 
     return 0;
 }
