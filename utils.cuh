@@ -1,5 +1,6 @@
 #include <cublas_v2.h>
 #include <cute/tensor.hpp>
+#include <cuda_bf16.h>  // Add bfloat16 support
 
 using namespace cute;
 
@@ -40,6 +41,27 @@ void cublas_multiply(float* A, float* B, float* C, int M, int N, int K, cublasHa
                             &beta,
                             C, N)); 
     
+}
+
+// bfloat16 version of cublas matmul
+void cublas_multiply_bf16(__nv_bfloat16* A, __nv_bfloat16* B, __nv_bfloat16* C, 
+                         int M, int N, int K, cublasHandle_t handle) {
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    
+    // For NT matmul with row-major inputs:
+    // C = A * B^T
+    // Since cuBLAS expects column-major, we compute:
+    // C^T = (B^T)^T * A^T = B * A^T
+    CUBLAS_CHECK(cublasGemmEx(handle, CUBLAS_OP_T, CUBLAS_OP_N,
+                             N, M, K,
+                             &alpha,
+                             B, CUDA_R_16BF, K,  
+                             A, CUDA_R_16BF, K,  
+                             &beta,
+                             C, CUDA_R_16BF, N,
+                             CUDA_R_32F,            // accumulate with FP32 
+                             CUBLAS_GEMM_DEFAULT)); 
 }
 
 

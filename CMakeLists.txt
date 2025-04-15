@@ -102,13 +102,30 @@ target_include_directories(simple_gemm
     ${CUDA_INCLUDE_DIRS}
 )
 
-# Set C++ standard for the target
 set_target_properties(simple_gemm PROPERTIES
     CUDA_STANDARD 17
     CUDA_STANDARD_REQUIRED ON
 )
 
-# Optional: Set up installation
-install(TARGETS simple_gemm
-    RUNTIME DESTINATION bin
+add_executable(simple_gemm_tc simple_gemm_tc.cu)
+
+target_link_libraries(simple_gemm_tc
+    PRIVATE
+    CUTLASS
+    ${CUDA_LIBRARIES}
+    cublas
+)
+
+target_include_directories(simple_gemm_tc
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/cutlass/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/cutlass/cute/include  
+    ${CUDA_INCLUDE_DIRS}
+    ${CUDA_BF16_INCLUDE_DIRS}
+)
+
+set_target_properties(simple_gemm_tc PROPERTIES
+    CUDA_STANDARD 17
+    CUDA_STANDARD_REQUIRED ON
 )
