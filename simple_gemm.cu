@@ -22,7 +22,8 @@
 
 using namespace cute;
 
-// Function to perform cuBLAS multiplication
+// cublas matmul tester (NT row-major inputs, just like in pytorch linear layers)
+// https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
 void cublas_multiply(float* A, float* B, float* C, int M, int N, int K) {
     cublasHandle_t handle;
     CUBLAS_CHECK(cublasCreate(&handle));
@@ -30,12 +31,14 @@ void cublas_multiply(float* A, float* B, float* C, int M, int N, int K) {
     float alpha = 1.0f;
     float beta = 0.0f;
     
-    // Note: cuBLAS expects column-major matrices, so we need to transpose the operation
-    // C = A * B becomes C^T = B^T * A^T
-    CUBLAS_CHECK(cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_T,
+    // For NT matmul with row-major inputs:
+    // C = A * B^T
+    // Since cuBLAS expects column-major, we compute:
+    // C^T = (B^T)^T * A^T = B * A^T
+    CUBLAS_CHECK(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T,
                             N, M, K,
                             &alpha,
-                            B, K,  // B^T
+                            B, N,  // B (no transpose)
                             A, K,  // A^T
                             &beta,
                             C, N));  // C^T
@@ -61,15 +64,79 @@ __global__ void simple_gemm_kernel(
     // note how both tiles here have the contraction mode BK and the iteration mode k in the same spots
     Tensor gA = local_tile(a, select<0, 2>(cta_tiler), make_coord(blockIdx.x, _)); // (BM, BK, k)
     Tensor gB = local_tile(b, select<1, 2>(cta_tiler), make_coord(blockIdx.y, _)); // (BN, BK, k)
+    Tensor gC = local_tile(a, select<0, 1>(cta_tiler), make_coord(blockIdx.x, blockIdx.y)); // BM, BK
+
+    // dim check on gA, B, C
+    CUTE_STATIC_ASSERT_V(size<0>(gA) == size<0>(cta_tiler));
+    CUTE_STATIC_ASSERT_V(size<1>(gA) == size<2>(cta_tiler));
+
+    CUTE_STATIC_ASSERT_V(size<0>(gB) == size<1>(cta_tiler));
+    CUTE_STATIC_ASSERT_V(size<1>(gB) == size<2>(cta_tiler));
+
+    CUTE_STATIC_ASSERT_V(size<0>(gC) == size<0>(cta_tiler));
+    CUTE_STATIC_ASSERT_V(size<1>(gC) == size<1>(cta_tiler));
+
+    // thread-local subtiles of the global tile:
+    // ta is (TM, TK), tb is (TN, TK), tc is its own thing?
+    Tensor tAgA = local_partition(gA, ta_tiler, threadIdx.x); // (TM, TK, k) (note that )
+    Tensor tBgB = local_partition(gB, tb_tiler, threadIdx.x); // (TN, TK, k)
+    Tensor tCgC = local_partition(gC, tc_tiler, threadIdx.x); 
+
+    CUTE_STATIC_ASSERT_V(shape<1>(ta_tiler) == shape<1>(tb_tiler));
 
     // alloc smem tensors for a and b
     __shared__ float smem_A[size(select<0, 2>(cta_tiler))];
     __shared__ float smem_B[size(select<1, 2>(cta_tiler))];
+    Tensor sA = make_tensor(make_smem_ptr(smem_A), make_layout(select<0, 2>(cta_tiler))); // (BM, BK)
+    Tensor sB = make_tensor(make_smem_ptr(smem_B), make_layout(select<1, 2>(cta_tiler))); // (BN, BK)
 
-    Tensor sA = make_tensor(make_smem_ptr(smem_A), make_layout(select<0, 2>(cta_tiler)));
-    Tensor sB = make_tensor(make_smem_ptr(smem_B), make_layout(select<1, 2>(cta_tiler)));
+    CUTE_STATIC_ASSERT_V(size<0>(sA) == size<0>(cta_tiler));
+    CUTE_STATIC_ASSERT_V(size<1>(sA) == size<2>(cta_tiler));
 
-    
+    CUTE_STATIC_ASSERT_V(size<0>(sB) == size<1>(cta_tiler));
+    CUTE_STATIC_ASSERT_V(size<1>(sB) == size<2>(cta_tiler));
+
+    // thread-local subtiles of smem
+    Tensor tAsA = local_partition(sA, ta_tiler, threadIdx.x); // (TM, TK)
+    Tensor tBsB = local_partition(sB, tb_tiler, threadIdx.x); // (TN, TK)
+
+    // static_assert(is_static_v<decltype(size<0>(tAsA))>);
+    // CUTE_STATIC_ASSERT_V(size<0>(tAsA) == size<0>(ta_tiler));
+    if (thread0()) {
+        print(tAsA);
+        printf("\n");
+        print(ta_tiler);
+        printf("\n");
+        print(ta_tiler);
+        printf("\n");
+        print(tBsB);
+        printf("\n");
+        print(ta_tiler);
+        printf("\n");
+    }
+
+    // static_assert(is_static_v<decltype(size<0>(tBsB))>);
+    // CUTE_STATIC_ASSERT_V(size<0>(tBsB) == size<0>(tb_tiler));
+
+    // thread-local register tensor for accumulating output of C 
+    // this implicitly tiles over the output C tile of dim (BM, BN)
+    Tensor rC = make_tensor<float>(tc_tiler); // (TM, TN)
+    // clear(rC);
+    fill(rC, 3.0);
+
+    // gemmm mainloop
+    for (int k=0; k<size<2>(gA); ++k) {
+
+        // load tiles of a and b
+        copy(tAgA(_, _, k), tAsA);
+        copy(tBgB(_, _, k), tBsB);
+        __syncthreads();
+
+        // does this just work?
+        // gemm(tAsA, tBsB, rC);
+    }
+
+    copy(rC, tCgC);
     
 }
 
@@ -97,6 +164,8 @@ int main() {
         h_C_cublas[i] = 0.0;
     }
 
+    
+
     // copy to device
     thrust::device_vector<float> d_A = h_A;
     thrust::device_vector<float> d_B = h_B;
@@ -123,6 +192,9 @@ int main() {
     // Copy results back to host
     h_C = d_C;
     h_C_cublas = d_C_cublas;
+    for (float& val : h_C_cublas)
+        val = 3.0;
+
     // Compare results
     int32_t errors = 0;
     int32_t const kErrorLimit = 10;
