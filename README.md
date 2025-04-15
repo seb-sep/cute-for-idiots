@@ -5,6 +5,7 @@
 `tiled_copy.cu`: a CuTe copy kernel for practicing layouts, tile management, and copying.
 `simple_gemm.cu`: a naive matmul kernel using CuTe.
 `utils.cuh`: Benchamrking and cuBLAS utilities
+`print_layouts.cu`: Scratchspace for printing and examining CuTe layouts
 
 ## Build
 

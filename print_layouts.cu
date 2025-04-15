@@ -8,19 +8,21 @@ int main() {
     // auto tiler = Shape<_2, _2>{};
     // auto thr = Layout<Shape<_2, _2>, Stride<_2, _1>>{};
     // (12,(4,8)):(59,(13,1))
-    auto a = make_layout(make_shape(8,24), LayoutRight{});  // (8,24)
-    auto tiler = Shape<_4,_8>{};                    // (_4,_8)
+    auto a = Layout<Shape<_4, _4>, Stride<_4, _1>>{};
+    auto b = Layout<Shape<_2, _2>, Stride<_2, _1>>{};
+    auto tiler = Shape<_4, _8>{};                    // (_4,_8)
 
-    auto tiled_a = zipped_divide(a, tiler);   
+    // auto tiled_a = zipped_divide(a, tiler);   
 
     TikzColor_TV color_fn;
     // TikzColor_BWx8 color_fn;
     // auto thrid = [](int tid) { return tid; };
-    print_latex(tiled_a);
-    // print_latex(result);
+
+    print_latex(tiled_divide(a, b), b, color_fn);
     // print(result);
+    // print_layout(logical_divide(a, tiler));
     printf("\n");
-    // print_layout(zipped_divide(layout, tiler));
+    // print_layout(zipped_divide(a, tiler));
     printf("\n");
     // print(tiled_divide(layout, tiler));
     printf("\n");
