@@ -4,6 +4,7 @@
 #include <cute/tensor.hpp>
 #include <random>
 #include <cuda_bf16.h>  // Add bfloat16 support
+#include <cutlass/bfloat16.h>
 
 #include "utils.cuh"
 
@@ -92,7 +93,7 @@ __global__ void simple_gemm_kernel(
 
     // thread-local register tensor for accumulating output of C 
     // this implicitly tiles over the output C tile of dim (BM, BN)
-    Tensor tCrC = make_tensor_like(tCgC);         
+    Tensor tCrC = make_tensor_like<float>(tCgC); // make sure to accuulate in fp32
 
     // Print tensors for thread 0
     #if DEBUG_PRINT
@@ -142,11 +143,15 @@ int main() {
 
     auto grid_shape = select<1, 2>(tiled_divide(make_layout(select<0, 1>(gemm_shape)), select<0, 1>(cta_tiler)));
 
+    using TA = cute::bfloat16_t;
+    using TB = cute::bfloat16_t;
+    using TC = cute::bfloat16_t;
+
     // Use float for host vectors for ease of initialization and verification
-    thrust::host_vector<float> h_A_float(size(select<0, 2>(gemm_shape)));
-    thrust::host_vector<float> h_B_float(size(select<1, 2>(gemm_shape)));
-    thrust::host_vector<float> h_C_float(size(select<0, 1>(gemm_shape)));
-    thrust::host_vector<float> h_C_cublas_float(size(select<0, 1>(gemm_shape)));
+    thrust::host_vector<TA> h_A(size(select<0, 2>(gemm_shape)));
+    thrust::host_vector<TB> h_B(size(select<1, 2>(gemm_shape)));
+    thrust::host_vector<TC> h_C(size(select<0, 1>(gemm_shape)));
+    thrust::host_vector<TC> h_C_cublas(size(select<0, 1>(gemm_shape)));
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -154,39 +159,21 @@ int main() {
     
     // Initialize with float values
     for (int i = 0; i < size(select<0, 2>(gemm_shape)); i++) {
-        h_A_float[i] = dist(gen);
+        h_A[i] = static_cast<TA>(dist(gen));
     }
     for (int i = 0; i < size(select<1, 2>(gemm_shape)); i++) {
-        h_B_float[i] = dist(gen);
+        h_B[i] = static_cast<TB>(dist(gen));
     }
     for (int i = 0; i < size(select<0, 1>(gemm_shape)); i++) {
-        h_C_float[i] = 0.0;
-        h_C_cublas_float[i] = 0.0;
-    }
-
-    // Convert float vectors to __nv_bfloat16 vectors
-    thrust::host_vector<__nv_bfloat16> h_A(size(select<0, 2>(gemm_shape)));
-    thrust::host_vector<__nv_bfloat16> h_B(size(select<1, 2>(gemm_shape)));
-    thrust::host_vector<__nv_bfloat16> h_C(size(select<0, 1>(gemm_shape)));
-    thrust::host_vector<__nv_bfloat16> h_C_cublas(size(select<0, 1>(gemm_shape)));
-
-    // Convert float to bfloat16
-    for (int i = 0; i < size(select<0, 2>(gemm_shape)); i++) {
-        h_A[i] = __float2bfloat16(h_A_float[i]);
-    }
-    for (int i = 0; i < size(select<1, 2>(gemm_shape)); i++) {
-        h_B[i] = __float2bfloat16(h_B_float[i]);
-    }
-    for (int i = 0; i < size(select<0, 1>(gemm_shape)); i++) {
-        h_C[i] = __float2bfloat16(0.0f);
-        h_C_cublas[i] = __float2bfloat16(0.0f);
+        h_C[i] = static_cast<TC>(0.0);
+        h_C_cublas[i] = static_cast<TC>(0.0);
     }
 
     // Copy to device
-    thrust::device_vector<__nv_bfloat16> d_A = h_A;
-    thrust::device_vector<__nv_bfloat16> d_B = h_B;
-    thrust::device_vector<__nv_bfloat16> d_C = h_C;
-    thrust::device_vector<__nv_bfloat16> d_C_cublas = h_C_cublas;
+    thrust::device_vector<TA> d_A = h_A;
+    thrust::device_vector<TB> d_B = h_B;
+    thrust::device_vector<TC> d_C = h_C;
+    thrust::device_vector<TC> d_C_cublas = h_C_cublas;
 
     // thrust::device_vector<float> d_A = h_A_float;
     // thrust::device_vector<float> d_B = h_B_float;
@@ -207,9 +194,9 @@ int main() {
     // Run cuBLAS GEMM with bf16
     cublasHandle_t handle;
     CUBLAS_CHECK(cublasCreate(&handle));
-    cublas_multiply_bf16(thrust::raw_pointer_cast(d_A.data()),
-                        thrust::raw_pointer_cast(d_B.data()),
-                        thrust::raw_pointer_cast(d_C_cublas.data()),
+    cublas_multiply_bf16(reinterpret_cast<__nv_bfloat16*>(thrust::raw_pointer_cast(d_A.data())),
+                        reinterpret_cast<__nv_bfloat16*>(thrust::raw_pointer_cast(d_B.data())),
+                        reinterpret_cast<__nv_bfloat16*>(thrust::raw_pointer_cast(d_C_cublas.data())),
                         size<0>(gemm_shape), size<1>(gemm_shape), size<2>(gemm_shape), handle);
 
     // Copy results back to host
@@ -221,8 +208,8 @@ int main() {
     thrust::host_vector<float> h_C_cublas_float_result(size(select<0, 1>(gemm_shape)));
     
     for (size_t i = 0; i < size(select<0, 1>(gemm_shape)); ++i) {
-        h_C_float_result[i] = __bfloat162float(h_C[i]);
-        h_C_cublas_float_result[i] = __bfloat162float(h_C_cublas[i]);
+        h_C_float_result[i] = static_cast<float>(h_C[i]);
+        h_C_cublas_float_result[i] = static_cast<float>(h_C_cublas[i]);
     }
 
     // Compare results
@@ -257,9 +244,9 @@ int main() {
     });
 
     float cublas_time = bench_gemm([&]() {
-        cublas_multiply_bf16(thrust::raw_pointer_cast(d_A.data()),
-                        thrust::raw_pointer_cast(d_B.data()),
-                        thrust::raw_pointer_cast(d_C_cublas.data()),
+        cublas_multiply_bf16(reinterpret_cast<__nv_bfloat16*>(thrust::raw_pointer_cast(d_A.data())),
+                        reinterpret_cast<__nv_bfloat16*>(thrust::raw_pointer_cast(d_B.data())),
+                        reinterpret_cast<__nv_bfloat16*>(thrust::raw_pointer_cast(d_C_cublas.data())),
                         size<0>(gemm_shape), size<1>(gemm_shape), size<2>(gemm_shape), handle);
     });
 
